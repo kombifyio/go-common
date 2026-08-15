@@ -1,0 +1,23 @@
+{
+  "version": "1",
+  "deployment_mode": "self_hosted",
+  "base_url": "https://kombify.home.arpa",
+  "instance_id": "home-primary-01",
+  "oidc": {
+    "issuer": "https://id.kombify.home.arpa/",
+    "client_id": "kombify-native-client",
+    "scopes": ["openid", "profile", "offline_access"],
+    "flow": "device_authorization"
+  },
+  "capabilities": ["central.documents", "techstack.runtime.read"],
+  "api_versions": {
+    "central": "1.0.0",
+    "techstack": "1.0.0"
+  },
+  "sync": {
+    "offline_read": true,
+    "offline_write": "outbox",
+    "etag": true,
+    "tombstones": true
+  }
+}

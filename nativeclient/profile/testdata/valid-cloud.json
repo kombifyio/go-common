@@ -1,0 +1,29 @@
+{
+  "version": "1",
+  "deployment_mode": "cloud",
+  "base_url": "https://api.kombify.io",
+  "instance_id": "kombify-cloud-prd",
+  "oidc": {
+    "issuer": "https://login.kombify.io/",
+    "client_id": "kombify-native-companion",
+    "audience": "https://api.kombify.io",
+    "scopes": ["openid", "profile", "email", "offline_access"],
+    "flow": "authorization_code_pkce"
+  },
+  "capabilities": [
+    "ai.chat",
+    "ai.history",
+    "agents.approvals",
+    "speechkit.voice",
+    "techstack.runtime.read"
+  ],
+  "api_versions": {
+    "gateway": "v1"
+  },
+  "sync": {
+    "offline_read": false,
+    "offline_write": "disabled",
+    "etag": false,
+    "tombstones": false
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "version": "1",
+  "deployment_mode": "local",
+  "base_url": "http://127.0.0.1:4321",
+  "instance_id": "local-windows-01",
+  "oidc": {
+    "issuer": "http://127.0.0.1:4321/oidc",
+    "client_id": "kombify-local-client",
+    "scopes": ["openid", "profile"],
+    "flow": "local_bootstrap"
+  },
+  "capabilities": ["techstack.runtime.read", "techstack.runtime.write"],
+  "api_versions": {
+    "techstack": "1.0.0"
+  },
+  "sync": {
+    "offline_read": true,
+    "offline_write": "outbox",
+    "etag": true,
+    "tombstones": true
+  }
+}

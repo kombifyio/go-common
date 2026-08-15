@@ -1,0 +1,21 @@
+{
+  "version": "1",
+  "deployment_mode": "cloud",
+  "base_url": "https://api.kombify.io",
+  "instance_id": "cloud-device-flow",
+  "oidc": {
+    "issuer": "https://login.kombify.io/",
+    "client_id": "kombify-native-client",
+    "audience": "https://api.kombify.io",
+    "scopes": ["openid", "profile", "offline_access"],
+    "flow": "device_authorization"
+  },
+  "capabilities": ["ai.chat"],
+  "api_versions": { "cloud": "v1" },
+  "sync": {
+    "offline_read": false,
+    "offline_write": "disabled",
+    "etag": true,
+    "tombstones": false
+  }
+}

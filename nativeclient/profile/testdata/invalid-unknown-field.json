@@ -1,0 +1,21 @@
+{
+  "version": "1",
+  "deployment_mode": "cloud",
+  "base_url": "https://api.kombify.io",
+  "instance_id": "unknown-field",
+  "provider_url": "https://provider.example.test",
+  "oidc": {
+    "issuer": "https://login.kombify.io/",
+    "client_id": "kombify-native-client",
+    "scopes": ["openid"],
+    "flow": "authorization_code_pkce"
+  },
+  "capabilities": [],
+  "api_versions": { "cloud": "1" },
+  "sync": {
+    "offline_read": false,
+    "offline_write": "disabled",
+    "etag": true,
+    "tombstones": false
+  }
+}
