@@ -439,7 +439,7 @@ func (s *Service) newStateCipher() (cipher.AEAD, error) {
 }
 
 func (s *Service) redirectToLoginError(w http.ResponseWriter, r *http.Request, code string) {
-	target := s.cfg.LoginErrorPath
+	target := sanitizeReturnTo(s.cfg.LoginErrorPath, "/login")
 	sep := "?"
 	if strings.Contains(target, "?") {
 		sep = "&"
