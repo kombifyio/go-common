@@ -108,7 +108,7 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error)
 		return nil, ErrInvalidToken
 	}
 	parserOptions := []jwt.ParserOption{
-		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 		jwt.WithIssuedAt(),
 	}
 	if v.cfg.ClockSkew > 0 {
@@ -116,7 +116,7 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error)
 	}
 	parser := jwt.NewParser(parserOptions...)
 	parsed, err := parser.ParseWithClaims(rawToken, jwt.MapClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if t.Method.Alg() != "RS256" {
+		if t.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, ErrUnsupportedAlg
 		}
 		kid, _ := t.Header["kid"].(string)

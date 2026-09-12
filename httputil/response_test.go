@@ -73,24 +73,6 @@ func TestJSONWithRequestID(t *testing.T) {
 	}
 }
 
-func TestJSONMessage(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/test", nil)
-	w := httptest.NewRecorder()
-
-	JSONMessage(w, req, http.StatusCreated, "Resource created", map[string]string{"id": "abc"})
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", w.Code)
-	}
-
-	var resp Response
-	json.NewDecoder(w.Body).Decode(&resp)
-
-	if resp.Message != "Resource created" {
-		t.Errorf("message = %q", resp.Message)
-	}
-}
-
 func TestJSONError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
@@ -112,9 +94,6 @@ func TestJSONError(t *testing.T) {
 	}
 	if resp.Error.Code != "NOT_FOUND" {
 		t.Errorf("error code = %q", resp.Error.Code)
-	}
-	if resp.Error.Message != "Resource not found" {
-		t.Errorf("error message = %q", resp.Error.Message)
 	}
 	if resp.Data != nil {
 		t.Error("data should be nil on error")

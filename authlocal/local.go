@@ -83,7 +83,7 @@ type Config struct {
 // Service is the local credential service.
 type Service struct {
 	cfg Config
-	mu  sync.Mutex // serialises bootstrap+claim races
+	mu  sync.Mutex // serializes bootstrap+claim races
 }
 
 // New validates Config and returns a [Service].

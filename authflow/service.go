@@ -21,14 +21,21 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kombifyio/go-common/authsession"
 	"github.com/kombifyio/go-common/oidcclient"
 )
 
-const defaultStateLifetime = 5 * time.Minute
+const (
+	defaultStateLifetime             = 5 * time.Minute
+	defaultReauthenticationMaxAge    = 5 * time.Minute
+	defaultReauthenticationClockSkew = 30 * time.Second
+	maxReauthenticationValueLength   = 256
+)
 
 // Errors returned by the flow service.
 var (
@@ -227,25 +234,37 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	returnTo := sanitizeReturnTo(r.URL.Query().Get("return_to"), s.cfg.DefaultReturnTo)
+	reauthPurpose, reauthResource, err := reauthenticationBinding(r.URL.Query())
+	if err != nil {
+		http.Error(w, "invalid reauthentication binding", http.StatusBadRequest)
+		return
+	}
 	verifier, challenge, err := oidcclient.PKCEVerifier()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	state, err := s.issueState(loginState{
-		ProviderID:   provider.ID(),
-		TenantID:     tenantID,
-		ReturnTo:     returnTo,
-		PKCEVerifier: verifier,
+		ProviderID:     provider.ID(),
+		TenantID:       tenantID,
+		ReturnTo:       returnTo,
+		PKCEVerifier:   verifier,
+		ReauthPurpose:  reauthPurpose,
+		ReauthResource: reauthResource,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	redirectURI := buildAbsoluteURL(r, s.cfg.CallbackPath)
-	// #nosec G710 -- NewProvider restricts the server-configured authorization
-	// endpoint to an absolute HTTP(S) URL; request values are query-encoded.
-	http.Redirect(w, r, provider.AuthCodeURL(redirectURI, state, challenge), http.StatusFound)
+	authorizationURL, err := authorizationURL(provider.AuthCodeURL(redirectURI, state, challenge), reauthPurpose != "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// #nosec G710 -- authorizationURL is based on the validated, server-configured
+	// provider endpoint and only adds URL-encoded parameters.
+	http.Redirect(w, r, authorizationURL, http.StatusFound)
 }
 
 func (s *Service) handleCallback(w http.ResponseWriter, r *http.Request) {
@@ -284,10 +303,18 @@ func (s *Service) handleCallback(w http.ResponseWriter, r *http.Request) {
 		s.redirectToLoginError(w, r, "invalid_id_token")
 		return
 	}
+	authenticatedAt := int64(0)
+	if state.ReauthPurpose != "" {
+		authenticatedAt, err = freshAuthenticationTime(claims.Raw, s.now().UTC())
+		if err != nil {
+			s.redirectToLoginError(w, r, "reauthentication_required")
+			return
+		}
+	}
 	tenantID := state.TenantID
 	if s.cfg.TenantResolver != nil {
-		resolved, err := s.cfg.TenantResolver(r.Context(), claims, provider.ID(), state.TenantID)
-		if err != nil || strings.TrimSpace(resolved) == "" {
+		resolved, resolveErr := s.cfg.TenantResolver(r.Context(), claims, provider.ID(), state.TenantID)
+		if resolveErr != nil || strings.TrimSpace(resolved) == "" {
 			s.redirectToLoginError(w, r, "tenant_resolve_failed")
 			return
 		}
@@ -298,18 +325,21 @@ func (s *Service) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cfg.UserUpsert != nil {
-		if err := s.cfg.UserUpsert(r.Context(), claims, tenantID, provider.ID()); err != nil {
+		if upsertErr := s.cfg.UserUpsert(r.Context(), claims, tenantID, provider.ID()); upsertErr != nil {
 			s.redirectToLoginError(w, r, "user_upsert_failed")
 			return
 		}
 	}
 	token, err := s.cfg.Sessions.Issue(authsession.Claims{
-		Subject:  claims.Subject,
-		TenantID: tenantID,
-		OrgID:    firstClaim(claims.Raw, "org_id", "org", "project_id"),
-		Email:    claims.Email,
-		Provider: provider.ID(),
-		Role:     firstClaim(claims.Raw, "role", "local_role"),
+		Subject:         claims.Subject,
+		TenantID:        tenantID,
+		OrgID:           firstClaim(claims.Raw, "org_id", "org", "project_id"),
+		Email:           claims.Email,
+		Provider:        provider.ID(),
+		Role:            firstClaim(claims.Raw, "role", "local_role"),
+		ReauthPurpose:   state.ReauthPurpose,
+		ReauthResource:  state.ReauthResource,
+		AuthenticatedAt: authenticatedAt,
 	})
 	if err != nil {
 		s.redirectToLoginError(w, r, "session_issue_failed")
@@ -346,23 +376,27 @@ func (s *Service) resolveProvider(id string) (*oidcclient.Provider, error) {
 }
 
 type loginState struct {
-	ProviderID   string `json:"provider_id"`
-	TenantID     string `json:"tenant_id"`
-	ReturnTo     string `json:"return_to"`
-	PKCEVerifier string `json:"pkv,omitempty"`
-	IssuedAt     int64  `json:"iat"`
-	ExpiresAt    int64  `json:"exp"`
+	ProviderID     string `json:"provider_id"`
+	TenantID       string `json:"tenant_id"`
+	ReturnTo       string `json:"return_to"`
+	PKCEVerifier   string `json:"pkv,omitempty"`
+	ReauthPurpose  string `json:"reauth_purpose,omitempty"`
+	ReauthResource string `json:"reauth_resource,omitempty"`
+	IssuedAt       int64  `json:"iat"`
+	ExpiresAt      int64  `json:"exp"`
 }
 
 func (s *Service) issueState(state loginState) (string, error) {
 	now := s.now().UTC()
 	claims := loginState{
-		ProviderID:   state.ProviderID,
-		TenantID:     state.TenantID,
-		ReturnTo:     sanitizeReturnTo(state.ReturnTo, s.cfg.DefaultReturnTo),
-		PKCEVerifier: state.PKCEVerifier,
-		IssuedAt:     now.Unix(),
-		ExpiresAt:    now.Add(defaultStateLifetime).Unix(),
+		ProviderID:     state.ProviderID,
+		TenantID:       state.TenantID,
+		ReturnTo:       sanitizeReturnTo(state.ReturnTo, s.cfg.DefaultReturnTo),
+		PKCEVerifier:   state.PKCEVerifier,
+		ReauthPurpose:  state.ReauthPurpose,
+		ReauthResource: state.ReauthResource,
+		IssuedAt:       now.Unix(),
+		ExpiresAt:      now.Add(defaultStateLifetime).Unix(),
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
@@ -383,12 +417,89 @@ func (s *Service) parseState(raw string) (*loginState, error) {
 	if claims.ProviderID == "" {
 		return nil, ErrInvalidState
 	}
+	if _, _, err := normalizedReauthenticationBinding(claims.ReauthPurpose, claims.ReauthResource); err != nil {
+		return nil, ErrInvalidState
+	}
 	now := s.now().UTC().Unix()
 	if claims.IssuedAt <= 0 || claims.ExpiresAt <= now {
 		return nil, ErrInvalidState
 	}
 	claims.ReturnTo = sanitizeReturnTo(claims.ReturnTo, s.cfg.DefaultReturnTo)
 	return claims, nil
+}
+
+func reauthenticationBinding(query url.Values) (string, string, error) {
+	return normalizedReauthenticationBinding(query.Get("reauth_purpose"), query.Get("reauth_resource"))
+}
+
+func normalizedReauthenticationBinding(purpose, resource string) (string, string, error) {
+	purpose = strings.TrimSpace(purpose)
+	resource = strings.TrimSpace(resource)
+	if purpose == "" && resource == "" {
+		return "", "", nil
+	}
+	if purpose == "" || resource == "" || !validReauthenticationValue(purpose) || !validReauthenticationValue(resource) {
+		return "", "", ErrInvalidState
+	}
+	return purpose, resource, nil
+}
+
+func validReauthenticationValue(value string) bool {
+	if len(value) > maxReauthenticationValueLength {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func authorizationURL(raw string, reauthenticate bool) (string, error) {
+	if !reauthenticate {
+		return raw, nil
+	}
+	target, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse provider authorization URL: %w", err)
+	}
+	query := target.Query()
+	query.Set("prompt", "login")
+	query.Set("max_age", "0")
+	target.RawQuery = query.Encode()
+	return target.String(), nil
+}
+
+func freshAuthenticationTime(claims map[string]interface{}, now time.Time) (int64, error) {
+	unix, ok := unixClaim(claims["auth_time"])
+	if !ok {
+		return 0, ErrInvalidState
+	}
+	authenticatedAt := time.Unix(unix, 0).UTC()
+	if authenticatedAt.After(now.Add(defaultReauthenticationClockSkew)) || now.Sub(authenticatedAt) > defaultReauthenticationMaxAge {
+		return 0, ErrInvalidState
+	}
+	return unix, nil
+}
+
+func unixClaim(raw interface{}) (int64, bool) {
+	switch value := raw.(type) {
+	case float64:
+		return int64(value), value > 0 && value == float64(int64(value))
+	case json.Number:
+		parsed, err := value.Int64()
+		return parsed, err == nil && parsed > 0
+	case int64:
+		return value, value > 0
+	case int:
+		return int64(value), value > 0
+	case string:
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		return parsed, err == nil && parsed > 0
+	default:
+		return 0, false
+	}
 }
 
 func (s *Service) sealState(plaintext []byte) (string, error) {

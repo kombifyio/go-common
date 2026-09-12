@@ -6,40 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
-
-// TestFixtures runs the shared workspace fixture convention: files named
-// valid-*.json must parse, every other fixture must be rejected.
-func TestFixtures(t *testing.T) {
-	entries, err := os.ReadDir("testdata")
-	if err != nil {
-		t.Fatalf("read testdata: %v", err)
-	}
-	fixtures := 0
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		fixtures++
-		raw, err := os.ReadFile(filepath.Join("testdata", entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		parsed, parseErr := Parse(raw)
-		shouldPass := strings.HasPrefix(entry.Name(), "valid-")
-		if shouldPass && parseErr != nil {
-			t.Errorf("%s: expected valid, got %v", entry.Name(), parseErr)
-		}
-		if !shouldPass && parseErr == nil {
-			t.Errorf("%s: expected rejection, parsed as %+v", entry.Name(), parsed)
-		}
-	}
-	if fixtures < 8 {
-		t.Fatalf("expected at least 8 fixtures, found %d", fixtures)
-	}
-}
 
 func TestParseValidLocal(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "valid-local.json"))

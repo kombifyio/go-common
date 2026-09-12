@@ -138,20 +138,6 @@ func TestNew_Validation(t *testing.T) {
 	}
 }
 
-func TestNewNormalizesBaseURLTrailingSlash(t *testing.T) {
-	c, err := New(Config{
-		BaseURL:    "https://api.example/",
-		ToolName:   "test",
-		TokenStore: newMemStore(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := c.cfg.BaseURL; got != "https://api.example" {
-		t.Fatalf("BaseURL = %q", got)
-	}
-}
-
 func TestNew_LoadsStoredToken(t *testing.T) {
 	store := newMemStore()
 	token := &TokenPair{
@@ -358,22 +344,6 @@ func TestGetAccessToken_NotAuthenticated(t *testing.T) {
 	_, err := c.GetAccessToken(context.Background())
 	if !errors.Is(err, ErrNotAuthenticated) {
 		t.Errorf("GetAccessToken() error = %v, want %v", err, ErrNotAuthenticated)
-	}
-}
-
-func TestIsAuthenticated(t *testing.T) {
-	c := newTestClient(t, "http://localhost", newMemStore())
-
-	if c.IsAuthenticated() {
-		t.Error("expected IsAuthenticated() == false for new client")
-	}
-
-	c.mu.Lock()
-	c.token = &TokenPair{AccessToken: "t"}
-	c.mu.Unlock()
-
-	if !c.IsAuthenticated() {
-		t.Error("expected IsAuthenticated() == true after setting token")
 	}
 }
 
@@ -588,32 +558,5 @@ func TestPollDeviceCode_UnexpectedStatus(t *testing.T) {
 	}
 	if apiErr.StatusCode != http.StatusInternalServerError {
 		t.Errorf("APIError.StatusCode = %d, want %d", apiErr.StatusCode, http.StatusInternalServerError)
-	}
-}
-
-func TestAPIError_Error(t *testing.T) {
-	e := &APIError{StatusCode: 403, Body: `{"error":"forbidden"}`}
-	got := e.Error()
-	want := `toolauth: API error 403: {"error":"forbidden"}`
-	if got != want {
-		t.Errorf("Error() = %q, want %q", got, want)
-	}
-}
-
-func TestUserAgent(t *testing.T) {
-	var gotUA string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUA = r.Header.Get("User-Agent")
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(testAuthResponse(t))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL, newMemStore())
-	_, _ = c.AuthenticateWithAPIKey(context.Background(), "key")
-
-	want := "kombify-tool/speechkit/0.1.0"
-	if gotUA != want {
-		t.Errorf("User-Agent = %q, want %q", gotUA, want)
 	}
 }

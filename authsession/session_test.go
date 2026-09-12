@@ -33,7 +33,7 @@ func TestIssueAndVerifyRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := m.Issue(Claims{Subject: "u-1", TenantID: "t-1", Email: "u@x", Provider: "primary", Role: "admin"})
+	raw, err := m.Issue(Claims{Subject: "u-1", TenantID: "t-1", Email: "u@x", Provider: "primary", Role: "admin", ReauthPurpose: "server-terminal", ReauthResource: "server-1", AuthenticatedAt: 42})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +41,15 @@ func TestIssueAndVerifyRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if c.Subject != "u-1" || c.TenantID != "t-1" || c.Provider != "primary" || c.Role != "admin" {
+	if c.Subject != "u-1" || c.TenantID != "t-1" || c.Provider != "primary" || c.Role != "admin" || c.ReauthPurpose != "server-terminal" || c.ReauthResource != "server-1" || c.AuthenticatedAt != 42 {
 		t.Fatalf("unexpected: %+v", c)
+	}
+}
+
+func TestIssueRejectsIncompleteReauthenticationBinding(t *testing.T) {
+	m, _ := NewManager(Config{Audience: "frontend", Secret: testSecret})
+	if _, err := m.Issue(Claims{Subject: "u", TenantID: "t", ReauthPurpose: "server-terminal"}); err == nil {
+		t.Fatal("expected incomplete reauthentication binding to fail")
 	}
 }
 

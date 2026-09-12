@@ -150,8 +150,8 @@ func (s *Service) Claim(ctx context.Context, req ClaimRequest) error {
 	if rec.Claimed {
 		return ErrAlreadyClaimed
 	}
-	if err := verifyPassword(rec.PasswordHash, req.CurrentPassword); err != nil {
-		return err
+	if passwordErr := verifyPassword(rec.PasswordHash, req.CurrentPassword); passwordErr != nil {
+		return passwordErr
 	}
 	newPwd := strings.TrimSpace(req.NewPassword)
 	if newPwd == "" {

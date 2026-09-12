@@ -98,8 +98,9 @@ func TestReveal_HappyPath(t *testing.T) {
 	if rev.Claimed {
 		t.Fatal("expected unclaimed")
 	}
-	if _, err := svc.Reveal(ctx); !errors.Is(err, ErrPasswordExpired) {
-		t.Fatalf("expected ErrPasswordExpired on second reveal, got %v", err)
+	_, revealErr := svc.Reveal(ctx)
+	if !errors.Is(revealErr, ErrPasswordExpired) {
+		t.Fatalf("expected ErrPasswordExpired on second reveal, got %v", revealErr)
 	}
 	st, err := svc.CurrentStatus(ctx)
 	if err != nil {
@@ -208,10 +209,11 @@ func TestCurrentStatus(t *testing.T) {
 		t.Fatalf("status: %v", err)
 	}
 	if st.Initialized {
-		t.Fatal("expected uninitialised before bootstrap")
+		t.Fatal("expected uninitialized before bootstrap")
 	}
-	if _, err := svc.Bootstrap(ctx); err != nil {
-		t.Fatalf("bootstrap: %v", err)
+	_, bootstrapErr := svc.Bootstrap(ctx)
+	if bootstrapErr != nil {
+		t.Fatalf("bootstrap: %v", bootstrapErr)
 	}
 	st, err = svc.CurrentStatus(ctx)
 	if err != nil {

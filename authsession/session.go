@@ -12,7 +12,7 @@
 //  3. The frontend-API contract stays stable across providers.
 //
 // Donor: kombify-Techstack/pkg/v2/auth/session (lifted 2026-05-03 as part of
-// the auth standardisation; kept verbatim apart from the package rename).
+// the auth standardization; kept verbatim apart from the package rename).
 package authsession
 
 import (
@@ -55,14 +55,17 @@ type Config struct {
 
 // Claims is the payload of a session token.
 type Claims struct {
-	Subject  string `json:"sub"`
-	TenantID string `json:"tid"`
-	OrgID    string `json:"org,omitempty"`
-	Email    string `json:"email,omitempty"`
-	Provider string `json:"prv,omitempty"`
-	Role     string `json:"role,omitempty"`
-	IssuedAt int64  `json:"iat,omitempty"`
-	Expires  int64  `json:"exp,omitempty"`
+	Subject         string `json:"sub"`
+	TenantID        string `json:"tid"`
+	OrgID           string `json:"org,omitempty"`
+	Email           string `json:"email,omitempty"`
+	Provider        string `json:"prv,omitempty"`
+	Role            string `json:"role,omitempty"`
+	ReauthPurpose   string `json:"reauth_purpose,omitempty"`
+	ReauthResource  string `json:"reauth_resource,omitempty"`
+	AuthenticatedAt int64  `json:"auth_time,omitempty"`
+	IssuedAt        int64  `json:"iat,omitempty"`
+	Expires         int64  `json:"exp,omitempty"`
 }
 
 // Manager mints and verifies session tokens.
@@ -96,6 +99,11 @@ func (m *Manager) Issue(c Claims) (string, error) {
 	if strings.TrimSpace(c.TenantID) == "" {
 		return "", fmt.Errorf("%w: tenant_id required", ErrInvalidToken)
 	}
+	c.ReauthPurpose = strings.TrimSpace(c.ReauthPurpose)
+	c.ReauthResource = strings.TrimSpace(c.ReauthResource)
+	if !validReauthBinding(c.ReauthPurpose, c.ReauthResource, c.AuthenticatedAt) {
+		return "", fmt.Errorf("%w: incomplete reauthentication binding", ErrInvalidToken)
+	}
 	now := time.Now()
 	mc := jwt.MapClaims{
 		"iss": m.cfg.Issuer,
@@ -116,6 +124,11 @@ func (m *Manager) Issue(c Claims) (string, error) {
 	}
 	if c.Role != "" {
 		mc["role"] = c.Role
+	}
+	if c.ReauthPurpose != "" {
+		mc["reauth_purpose"] = c.ReauthPurpose
+		mc["reauth_resource"] = c.ReauthResource
+		mc["auth_time"] = c.AuthenticatedAt
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, mc)
 	return tok.SignedString(m.cfg.Secret)
@@ -151,6 +164,11 @@ func (m *Manager) Verify(raw string) (*Claims, error) {
 	out.Email, _ = mc["email"].(string)
 	out.Provider, _ = mc["prv"].(string)
 	out.Role, _ = mc["role"].(string)
+	out.ReauthPurpose, _ = mc["reauth_purpose"].(string)
+	out.ReauthResource, _ = mc["reauth_resource"].(string)
+	if v, ok := mc["auth_time"].(float64); ok {
+		out.AuthenticatedAt = int64(v)
+	}
 	if v, ok := mc["iat"].(float64); ok {
 		out.IssuedAt = int64(v)
 	}
@@ -160,7 +178,15 @@ func (m *Manager) Verify(raw string) (*Claims, error) {
 	if out.Subject == "" || out.TenantID == "" {
 		return nil, fmt.Errorf("%w: missing required claims", ErrInvalidToken)
 	}
+	if !validReauthBinding(out.ReauthPurpose, out.ReauthResource, out.AuthenticatedAt) {
+		return nil, fmt.Errorf("%w: incomplete reauthentication binding", ErrInvalidToken)
+	}
 	return out, nil
+}
+
+func validReauthBinding(purpose, resource string, authenticatedAt int64) bool {
+	bound := purpose != "" || resource != "" || authenticatedAt != 0
+	return !bound || (purpose != "" && resource != "" && authenticatedAt > 0)
 }
 
 func audMatches(raw interface{}, expected string) bool {

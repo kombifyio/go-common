@@ -3,6 +3,8 @@ package oidcclient
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -49,8 +51,11 @@ func TestNewProviderDerivesURLs(t *testing.T) {
 	if got := p.TokenURL(); got != "https://id.example/oauth/token" {
 		t.Fatalf("token url: %q", got)
 	}
-	if got := p.Scopes(); len(got) != 3 || got[0] != "openid" {
-		t.Fatalf("default scopes: %v", got)
+	got := p.Scopes()
+	for _, required := range []string{"openid", "profile", "email"} {
+		if !slices.Contains(got, required) {
+			t.Fatalf("default scopes missing %q: %v", required, got)
+		}
 	}
 }
 
@@ -102,6 +107,17 @@ func TestAuthCodeURLWithPKCE(t *testing.T) {
 	got := p.AuthCodeURL("http://localhost/cb", "s", "challenge-xyz")
 	if !strings.Contains(got, "code_challenge=challenge-xyz") || !strings.Contains(got, "code_challenge_method=S256") {
 		t.Fatalf("PKCE params missing: %q", got)
+	}
+}
+
+func TestAuthCodeURLPreservesProviderQuery(t *testing.T) {
+	p, err := NewProvider(ProviderConfig{ID: "p1", Kind: KindAuth0, Issuer: "https://issuer.example", ClientID: "cid", AuthorizationURL: "https://issuer.example/authorize?connection=primary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := url.Parse(p.AuthCodeURL("http://localhost/cb", "s", ""))
+	if err != nil || got.Query().Get("connection") != "primary" {
+		t.Fatalf("authorization query was not preserved: %q", got)
 	}
 }
 

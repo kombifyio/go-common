@@ -142,6 +142,11 @@ type loginResponse struct {
 	Provider string `json:"provider"`
 }
 
+type claimResponse struct {
+	OK       bool `json:"ok"`
+	LoggedIn bool `json:"logged_in"`
+}
+
 func (h *Handlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -241,16 +246,16 @@ func (h *Handlers) handleClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := h.svc.Authenticate(r.Context(), loginEmail, req.NewPassword)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logged_in": false})
+		writeJSON(w, http.StatusOK, claimResponse{OK: true})
 		return
 	}
 	token, err := h.svc.cfg.Sessions.Issue(claims)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logged_in": false})
+		writeJSON(w, http.StatusOK, claimResponse{OK: true})
 		return
 	}
 	authsession.SetSessionCookie(w, h.svc.CookieName(), token, h.svc.CookieSecure())
-	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "logged_in": true})
+	writeJSON(w, http.StatusCreated, claimResponse{OK: true, LoggedIn: true})
 }
 
 // ---- helpers ----

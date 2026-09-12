@@ -56,7 +56,7 @@ func newProviderFixture(t *testing.T) (*oidcclient.Provider, *rsa.PrivateKey, *h
 				"use": "sig",
 				"alg": "RS256",
 				"kid": "kid-1",
-				"n":   base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+				"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
 				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes()),
 			}},
 		}
@@ -101,22 +101,99 @@ func newServiceFixture(t *testing.T, exchanger oidcclient.CodeExchanger) (*Servi
 	return svc, mgr
 }
 
-func signIDToken(t *testing.T, key *rsa.PrivateKey, issuer string) string {
+func signIDToken(t *testing.T, key *rsa.PrivateKey, issuer string, additional ...jwt.MapClaims) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+	claims := jwt.MapClaims{
 		"iss":   issuer,
 		"aud":   "kombify-client",
 		"sub":   "user-123",
 		"email": "user@example.com",
 		"role":  "admin",
 		"exp":   time.Now().Add(time.Minute).Unix(),
-	})
+	}
+	for _, extra := range additional {
+		for key, value := range extra {
+			claims[key] = value
+		}
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = "kid-1"
 	raw, err := token.SignedString(key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestReauthenticationBindsFreshProviderLoginToSession(t *testing.T) {
+	provider, key, server := newProviderFixture(t)
+	defer server.Close()
+	registry := oidcclient.NewRegistry()
+	registry.Add(provider)
+	mgr, _ := authsession.NewManager(authsession.Config{Audience: "frontend", Secret: testSessionSecret})
+	now := time.Now().UTC().Truncate(time.Second)
+	fake := &fakeExchanger{result: &oidcclient.CodeExchangeResult{IDToken: signIDToken(t, key, server.URL, jwt.MapClaims{"auth_time": now.Unix()})}}
+	svc, err := NewService(Config{Providers: registry, Sessions: mgr, StateSecret: testStateSecret, DefaultProviderID: "primary", DefaultTenantID: "tenant-default", DefaultReturnTo: "/dashboard", Exchanger: fake, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginReq := httptest.NewRequest(http.MethodGet, "/login?reauth_purpose=kombify.cloud.server-terminal.v1&reauth_resource=server-1", nil)
+	loginReq.Host = "127.0.0.1:5260"
+	loginRec := httptest.NewRecorder()
+	svc.LoginHandler().ServeHTTP(loginRec, loginReq)
+	location, err := url.Parse(loginRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Query().Get("prompt") != "login" || location.Query().Get("max_age") != "0" {
+		t.Fatalf("provider redirect does not require a fresh login: %s", location)
+	}
+	state := mustStateFromRedirect(t, location.String())
+	callbackReq := httptest.NewRequest(http.MethodGet, "/callback?code=c&state="+url.QueryEscape(state), nil)
+	callbackReq.Host = "127.0.0.1:5260"
+	callbackRec := httptest.NewRecorder()
+	svc.CallbackHandler().ServeHTTP(callbackRec, callbackReq)
+	sessionCookie := findCookie(callbackRec.Result().Cookies(), authsession.DefaultSessionCookieName)
+	if sessionCookie == nil {
+		t.Fatal("fresh reauthentication did not mint a session")
+	}
+	claims, err := mgr.Verify(sessionCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.ReauthPurpose != "kombify.cloud.server-terminal.v1" || claims.ReauthResource != "server-1" || claims.AuthenticatedAt != now.Unix() {
+		t.Fatalf("session is not bound to the reauthentication: %+v", claims)
+	}
+}
+
+func TestReauthenticationRejectsIDTokenWithoutFreshAuthenticationTime(t *testing.T) {
+	provider, key, server := newProviderFixture(t)
+	defer server.Close()
+	registry := oidcclient.NewRegistry()
+	registry.Add(provider)
+	mgr, _ := authsession.NewManager(authsession.Config{Audience: "frontend", Secret: testSessionSecret})
+	for name, extra := range map[string]jwt.MapClaims{
+		"missing": nil,
+		"stale":   {"auth_time": time.Now().Add(-defaultReauthenticationMaxAge - time.Minute).Unix()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeExchanger{result: &oidcclient.CodeExchangeResult{IDToken: signIDToken(t, key, server.URL, extra)}}
+			svc, err := NewService(Config{Providers: registry, Sessions: mgr, StateSecret: testStateSecret, DefaultProviderID: "primary", DefaultTenantID: "tenant-default", Exchanger: fake})
+			if err != nil {
+				t.Fatal(err)
+			}
+			loginReq := httptest.NewRequest(http.MethodGet, "/login?reauth_purpose=kombify.cloud.server-terminal.v1&reauth_resource=server-1", nil)
+			loginRec := httptest.NewRecorder()
+			svc.LoginHandler().ServeHTTP(loginRec, loginReq)
+			state := mustStateFromRedirect(t, loginRec.Header().Get("Location"))
+			callbackReq := httptest.NewRequest(http.MethodGet, "/callback?code=c&state="+url.QueryEscape(state), nil)
+			callbackRec := httptest.NewRecorder()
+			svc.CallbackHandler().ServeHTTP(callbackRec, callbackReq)
+			if findCookie(callbackRec.Result().Cookies(), authsession.DefaultSessionCookieName) != nil {
+				t.Fatal("reauthentication without fresh auth_time minted a session")
+			}
+		})
+	}
 }
 
 func TestProvidersHandler(t *testing.T) {
@@ -135,7 +212,13 @@ func TestProvidersHandler(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Providers) != 1 || body.Providers[0].ID != "primary" {
+	foundPrimary := false
+	for _, provider := range body.Providers {
+		if provider.ID == "primary" {
+			foundPrimary = true
+		}
+	}
+	if !foundPrimary {
 		t.Fatalf("unexpected body: %+v", body)
 	}
 }
@@ -261,10 +344,11 @@ func TestCallbackHandlerSetsCookieAndRedirects(t *testing.T) {
 		t.Fatal("PKCE verifier not propagated")
 	}
 	cookies := callbackRec.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != authsession.DefaultSessionCookieName {
+	sessionCookie := findCookie(cookies, authsession.DefaultSessionCookieName)
+	if sessionCookie == nil {
 		t.Fatalf("cookies=%+v", cookies)
 	}
-	claims, err := mgr.Verify(cookies[0].Value)
+	claims, err := mgr.Verify(sessionCookie.Value)
 	if err != nil {
 		t.Fatalf("verify session cookie: %v", err)
 	}
@@ -299,11 +383,9 @@ func TestLogoutHandlerClearsCookieAndRedirects(t *testing.T) {
 		t.Fatalf("redirect=%q", got)
 	}
 	cookies := rec.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("cookies=%+v", cookies)
-	}
-	if cookies[0].Name != authsession.DefaultSessionCookieName || cookies[0].MaxAge != -1 {
-		t.Fatalf("logout cookie=%+v", cookies[0])
+	sessionCookie := findCookie(cookies, authsession.DefaultSessionCookieName)
+	if sessionCookie == nil || sessionCookie.MaxAge != -1 {
+		t.Fatalf("logout cookies=%+v", cookies)
 	}
 }
 
@@ -361,10 +443,11 @@ func TestTenantResolverInvoked(t *testing.T) {
 		t.Fatalf("resolver called %d times", resolverCalls)
 	}
 	cookies := cbRec.Result().Cookies()
-	if len(cookies) != 1 {
+	sessionCookie := findCookie(cookies, authsession.DefaultSessionCookieName)
+	if sessionCookie == nil {
 		t.Fatalf("cookies=%+v", cookies)
 	}
-	claims, err := mgr.Verify(cookies[0].Value)
+	claims, err := mgr.Verify(sessionCookie.Value)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -384,4 +467,13 @@ func mustStateFromRedirect(t *testing.T, location string) string {
 		t.Fatal("state missing")
 	}
 	return state
+}
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
 }

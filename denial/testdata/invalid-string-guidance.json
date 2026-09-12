@@ -1,0 +1,6 @@
+{
+  "error_code": "runtime.entitlement_denied",
+  "reason_code": "missing_feature",
+  "retryable": false,
+  "user_guidance": "Ask an administrator."
+}

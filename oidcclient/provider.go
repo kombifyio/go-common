@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-// Kind enumerates the supported provider flavours. The kind drives default
+// Kind enumerates the supported provider flavors. The kind drives default
 // discovery URL composition; once a provider is constructed all kinds share
 // the same OIDC verification path.
 type Kind string
@@ -40,7 +40,7 @@ var (
 // ProviderConfig describes a single identity provider entry.
 type ProviderConfig struct {
 	ID               string   // logical id (per org/tenant), e.g. "primary", "auth0-saas"
-	Kind             Kind     // provider flavour (drives default URL composition)
+	Kind             Kind     // provider flavor (drives default URL composition)
 	Issuer           string   // required
 	Audience         string   // optional; defaults to ClientID
 	ClientID         string   // required for auth code login
@@ -60,7 +60,7 @@ type Provider struct {
 // ID returns the logical provider id.
 func (p *Provider) ID() string { return p.cfg.ID }
 
-// Kind returns the provider flavour.
+// Kind returns the provider flavor.
 func (p *Provider) Kind() Kind { return p.cfg.Kind }
 
 // Issuer returns the provider issuer URL.
@@ -88,7 +88,8 @@ func (p *Provider) Scopes() []string {
 // AuthCodeURL constructs the user-agent redirect URL for starting an
 // auth-code flow. When codeChallenge is non-empty PKCE (S256) is added.
 func (p *Provider) AuthCodeURL(redirectURI, state, codeChallenge string) string {
-	params := url.Values{}
+	target, _ := url.Parse(p.cfg.AuthorizationURL)
+	params := target.Query()
 	params.Set("client_id", p.cfg.ClientID)
 	params.Set("redirect_uri", redirectURI)
 	params.Set("response_type", "code")
@@ -100,7 +101,8 @@ func (p *Provider) AuthCodeURL(redirectURI, state, codeChallenge string) string 
 		params.Set("code_challenge", codeChallenge)
 		params.Set("code_challenge_method", "S256")
 	}
-	return p.cfg.AuthorizationURL + "?" + params.Encode()
+	target.RawQuery = params.Encode()
+	return target.String()
 }
 
 // Verify delegates to the underlying OIDC verifier.

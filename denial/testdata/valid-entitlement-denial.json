@@ -1,0 +1,20 @@
+{
+  "error_code": "runtime.entitlement_denied",
+  "reason_code": "missing_feature",
+  "request_id": "req_01",
+  "capability": "techstack.runtime.write",
+  "provider_id": "ionos-managed",
+  "required_features": ["cloud.runtime.credits"],
+  "missing_features": ["cloud.runtime.credits"],
+  "retryable": false,
+  "user_guidance": {
+    "title": "Runtime creation is unavailable",
+    "body": "This workspace does not currently have the required managed-runtime entitlement.",
+    "next_steps": ["Ask a workspace administrator to enable managed runtimes."]
+  },
+  "remediation": "Verify the Cloud entitlement projection before retrying.",
+  "support_context": {
+    "feature_source": "cloud-entitlement-broker",
+    "cost_bearing": true
+  }
+}

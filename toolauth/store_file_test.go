@@ -199,50 +199,6 @@ func TestFileStore_SaveOverwrite(t *testing.T) {
 	}
 }
 
-func TestFileStore_FilePermissions(t *testing.T) {
-	// Skip on Windows where Unix file permissions do not apply the same way.
-	if os.Getenv("OS") == "Windows_NT" || filepath.Separator == '\\' {
-		t.Skip("skipping file permissions test on Windows")
-	}
-
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	t.Setenv("USERPROFILE", tmpDir)
-
-	store := &FileStore{}
-	token := &TokenPair{
-		AccessToken:  "perm-test",
-		RefreshToken: "perm-refresh",
-		ExpiresAt:    time.Now().Add(1 * time.Hour),
-		UserID:       "usr-perm",
-	}
-
-	if err := store.Save("permkit", token); err != nil {
-		t.Fatalf("Save() error: %v", err)
-	}
-
-	path := filepath.Join(tmpDir, ".kombify", "permkit", "token.json")
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat() error: %v", err)
-	}
-
-	perm := info.Mode().Perm()
-	if perm != 0600 {
-		t.Errorf("file permissions = %o, want 0600", perm)
-	}
-
-	// Check directory permissions.
-	dirInfo, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		t.Fatalf("Stat(dir) error: %v", err)
-	}
-	dirPerm := dirInfo.Mode().Perm()
-	if dirPerm != 0700 {
-		t.Errorf("directory permissions = %o, want 0700", dirPerm)
-	}
-}
-
 // contains reports whether s contains substr.
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {

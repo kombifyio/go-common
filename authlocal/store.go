@@ -12,7 +12,7 @@ type Record struct {
 	// operator rename it.
 	Email string
 	// PasswordHash is bcrypt(password). Empty means the record has not been
-	// initialised yet.
+	// initialized yet.
 	PasswordHash string
 	// ShowPassword carries the plaintext password while the envelope is
 	// alive. Empty after Reveal() consumed it or PasswordEnvelopeTTL elapsed.
@@ -29,7 +29,7 @@ type Record struct {
 
 // Store persists the singleton break-glass admin record.
 //
-// Implementations must serialise concurrent writes; Get may return a copy.
+// Implementations must serialize concurrent writes; Get may return a copy.
 // Save replaces the entire record (single-row collection semantics).
 type Store interface {
 	// Get returns the current record or nil if it has never been written.

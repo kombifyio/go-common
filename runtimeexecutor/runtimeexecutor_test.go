@@ -257,10 +257,10 @@ func TestInvokeExactOutcomeCancellationPanicAndCopies(t *testing.T) {
 		t.Fatalf("identity mismatch error = %v", err)
 	}
 
-	cancelled, cancel := context.WithCancel(context.Background())
+	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	preCancelled := &mockExecutor{identity: request.Executor, outcome: exactOutcome(request)}
-	if _, err := Invoke(cancelled, preCancelled, request); codeOf(err) != ErrorCancelled || !errors.Is(err, context.Canceled) || preCancelled.calls != 0 {
+	if _, err := Invoke(canceled, preCancelled, request); codeOf(err) != ErrorCancelled || !errors.Is(err, context.Canceled) || preCancelled.calls != 0 {
 		t.Fatalf("pre-cancel = %v, calls=%d", err, preCancelled.calls)
 	}
 

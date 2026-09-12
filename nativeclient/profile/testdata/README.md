@@ -1,7 +1,7 @@
 # ClientConnectionProfile v1 fixtures
 
 Copied from the workspace SSOT
-`the public fixture set`
+`kombify-workspace/internal/standards-enforcement/client-connection-profile-fixtures/`
 (gate: `mise run client-foundation:check`). Keep byte-identical when the SSOT
 changes.
 
